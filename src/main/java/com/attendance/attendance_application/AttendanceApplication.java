@@ -27,7 +27,7 @@ public class AttendanceApplication {
 			// Create sample employee
 			Employee emp = new Employee();
 			emp.setName("Test User Dad");
-			emp.setEmail("Bhaskar01@company.com");
+			emp.setEmail("Bhaskar7689@company.com");
 			emp.setTeamId("Test-09");
 			Employee saved = employeeRepo.save(emp);
 			System.out.println("Saved employee with ID: " + saved.getId());
