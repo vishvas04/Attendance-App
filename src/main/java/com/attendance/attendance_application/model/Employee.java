@@ -1,10 +1,10 @@
 package com.attendance.attendance_application.model;
 
-import com.attendance.attendance_application.repository.EmployeeRepository;
 import jakarta.persistence.*;
 import org.hibernate.annotations.NaturalId;
-import org.springframework.boot.CommandLineRunner;
-import org.springframework.context.annotation.Bean;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "employees")
@@ -28,6 +28,10 @@ public class Employee {
     @Column(nullable = false, name = "team_id")
     private String teamId;
 
+    // Critical fix: Add the missing relationship
+    @OneToMany(mappedBy = "employee", fetch = FetchType.LAZY)
+    private List<AttendanceRecord> attendanceRecords = new ArrayList<>();
+
     // Getters and Setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -37,4 +41,8 @@ public class Employee {
     public void setEmail(String email) { this.email = email; }
     public String getTeamId() { return teamId; }
     public void setTeamId(String teamId) { this.teamId = teamId; }
+    public List<AttendanceRecord> getAttendanceRecords() { return attendanceRecords; }
+    public void setAttendanceRecords(List<AttendanceRecord> attendanceRecords) {
+        this.attendanceRecords = attendanceRecords;
+    }
 }

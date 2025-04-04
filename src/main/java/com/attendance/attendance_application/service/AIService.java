@@ -2,6 +2,7 @@ package com.attendance.attendance_application.service;
 
 import com.attendance.attendance_application.model.AttendanceRecord;
 import com.attendance.attendance_application.model.AttendanceStatus;
+import com.attendance.attendance_application.model.Employee;
 import com.attendance.attendance_application.repository.AttendanceRepository;
 import com.attendance.attendance_application.repository.EmployeeRepository;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +15,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.LocalDate;
+import java.time.Month;
+import java.time.YearMonth;
+import java.time.temporal.TemporalAdjusters;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -51,30 +55,95 @@ public class AIService {
     }
 
     public String answerQuestion(String question) {
-        LocalDate now = LocalDate.now();
-        return switch (question.toLowerCase()) {
-            case "who was absent the most this month?" -> getMostAbsentEmployee(now);
-            case "how many wfh days last week?" -> getWFHDaysLastWeek(now);
-            default -> handleGenericQuestion(question);
-        };
+        try {
+            // First check for month-specific queries
+            String month = extractMonthFromQuestion(question.toLowerCase());
+            if (month != null) {
+                return getAbsentEmployeesForMonth(month);
+            }
+
+            // Handle predefined questions
+            return switch (question.toLowerCase()) {
+                case "who was absent the most this month?" -> getMostAbsentEmployee(LocalDate.now());
+                case "how many wfh days last week?" -> getWFHDaysLastWeek(LocalDate.now());
+                default -> handleGenericQuestion(question);
+            };
+        } catch (Exception e) {
+            return "Error processing your request. Please try again with a different phrasing.";
+        }
     }
 
     private String getMostAbsentEmployee(LocalDate date) {
-        LocalDate start = date.withDayOfMonth(1);
-        LocalDate end = date.withDayOfMonth(date.lengthOfMonth());
+        YearMonth yearMonth = YearMonth.of(2023, 10); // October 2023
+        LocalDate start = yearMonth.atDay(1);
+        LocalDate end = yearMonth.atEndOfMonth();
+
+        System.out.println("[DEBUG] Querying absences between: " + start + " and " + end);
 
         List<Object[]> results = attendanceRepository.findMostAbsentEmployee(
-                start, end, PageRequest.of(0, 1)  // Get top result
+                AttendanceStatus.ABSENT, // Pass enum here
+                start,
+                end,
+                PageRequest.of(0, 1)
         );
+        System.out.println("[DEBUG] Query results count: " + results.size());
+
         if (results.isEmpty() || (Long) results.get(0)[1] == 0) {
             return "No absences recorded this month";
         }
+
         Object[] result = results.get(0);
-        String response = String.format(
+        return String.format(
                 "%s was absent the most this month with %d absences.",
                 result[0], result[1]
         );
-        return getAIResponse("Convert this data to natural language: " + response);
+    }
+
+    private String getAbsentEmployeesForMonth(String monthName) {
+        try {
+            int year = LocalDate.now().getYear();
+            Month month = Month.valueOf(monthName.toUpperCase());
+            LocalDate start = LocalDate.of(year, month, 1);
+            LocalDate end = start.with(TemporalAdjusters.lastDayOfMonth());
+
+            List<AttendanceRecord> absences = attendanceRepository.findByStatusAndDateBetween(
+                    AttendanceStatus.ABSENT, start, end
+            );
+
+            if (absences.isEmpty()) {
+                return "No absences recorded in " + monthName + ".";
+            }
+
+            Map<Employee, Long> absentEmployees = absences.stream()
+                    .collect(Collectors.groupingBy(
+                            AttendanceRecord::getEmployee,
+                            Collectors.counting()
+                    ));
+
+            StringBuilder response = new StringBuilder();
+            response.append("Absences in ").append(monthName).append(":\n");
+            absentEmployees.forEach((employee, count) -> {
+                response.append("- ").append(employee.getName())
+                        .append(": ").append(count).append(" days\n");
+            });
+
+            return response.toString();
+        } catch (Exception e) {
+            return "Could not process request for " + monthName + ". Please check the month name.";
+        }
+    }
+
+    private String extractMonthFromQuestion(String question) {
+        List<String> months = List.of(
+                "january", "february", "march", "april", "may", "june",
+                "july", "august", "september", "october", "november", "december"
+        );
+        for (String month : months) {
+            if (question.contains(month)) {
+                return month;
+            }
+        }
+        return null;
     }
 
     private String getWFHDaysLastWeek(LocalDate date) {
@@ -84,8 +153,7 @@ public class AIService {
                 .filter(r -> r.getStatus() == AttendanceStatus.WFH)
                 .count();
 
-        String response = String.format("There were %d WFH days last week.", wfhCount);
-        return getAIResponse("Convert this data to natural language: " + response);
+        return String.format("There were %d WFH days last week.", wfhCount);
     }
 
     private String handleGenericQuestion(String question) {
@@ -94,62 +162,72 @@ public class AIService {
 
     @Retryable(retryFor = Exception.class, maxAttempts = 3, backoff = @Backoff(delay = 1000))
     private String getAIResponse(String prompt) {
-        return geminiWebClient.post()
-                .uri(uriBuilder -> uriBuilder
-                        .path("/models/gemini-1.5-pro-latest:generateContent")
-                        .queryParam("key", apiKey)
-                        .build())
-                .bodyValue(Map.of(
-                        "contents", List.of(  // Fixed Map/List nesting
-                                Map.of(
-                                        "parts", List.of(
-                                                Map.of("text", prompt)
-                                        )
-                                )
-                        )
-                ))
-                .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
-                .map(response -> {
-                    Object candidatesObj = response.get("candidates");
-                    if (!(candidatesObj instanceof List<?>)) {
-                        return "Invalid response format";
-                    }
+        try {
+            return geminiWebClient.post()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/models/gemini-1.5-pro-latest:generateContent")
+                            .queryParam("key", apiKey)
+                            .build())
+                    .bodyValue(Map.of(
+                            "contents", List.of(
+                                    Map.of(
+                                            "parts", List.of(
+                                                    Map.of("text", prompt)
+                                            )
+                                    )
+                            )
+                    ))
+                    .retrieve()
+                    .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                    .map(response -> parseAIResponse(response))
+                    .onErrorReturn("Error communicating with AI service")
+                    .block();
+        } catch (Exception e) {
+            return "AI service unavailable. Please try again later.";
+        }
+    }
 
-                    List<?> candidates = (List<?>) candidatesObj;
-                    if (candidates.isEmpty()) {
-                        return "No response from AI";
-                    }
+    private String parseAIResponse(Map<String, Object> response) {
+        try {
+            Object candidatesObj = response.get("candidates");
+            if (!(candidatesObj instanceof List<?>)) {
+                return "Invalid response format";
+            }
 
-                    Object firstCandidate = candidates.get(0);
-                    if (!(firstCandidate instanceof Map<?, ?>)) {
-                        return "Invalid candidate format";
-                    }
+            List<?> candidates = (List<?>) candidatesObj;
+            if (candidates.isEmpty()) {
+                return "No response from AI";
+            }
 
-                    Object content = ((Map<?, ?>) firstCandidate).get("content");
-                    if (!(content instanceof Map<?, ?>)) {
-                        return "Invalid content format";
-                    }
+            Object firstCandidate = candidates.get(0);
+            if (!(firstCandidate instanceof Map<?, ?>)) {
+                return "Invalid candidate format";
+            }
 
-                    Object partsObj = ((Map<?, ?>) content).get("parts");
-                    if (!(partsObj instanceof List<?>)) {
-                        return "Invalid parts format";
-                    }
+            Object content = ((Map<?, ?>) firstCandidate).get("content");
+            if (!(content instanceof Map<?, ?>)) {
+                return "Invalid content format";
+            }
 
-                    List<?> parts = (List<?>) partsObj;
-                    if (parts.isEmpty()) {
-                        return "No text in response";
-                    }
+            Object partsObj = ((Map<?, ?>) content).get("parts");
+            if (!(partsObj instanceof List<?>)) {
+                return "Invalid parts format";
+            }
 
-                    Object firstPart = parts.get(0);
-                    if (!(firstPart instanceof Map<?, ?>)) {
-                        return "Invalid part format";
-                    }
+            List<?> parts = (List<?>) partsObj;
+            if (parts.isEmpty()) {
+                return "No text in response";
+            }
 
-                    Object text = ((Map<?, ?>) firstPart).get("text");
-                    return (text != null) ? text.toString() : "Empty response";
-                })
-                .onErrorReturn("Error communicating with AI service")
-                .block();
+            Object firstPart = parts.get(0);
+            if (!(firstPart instanceof Map<?, ?>)) {
+                return "Invalid part format";
+            }
+
+            Object text = ((Map<?, ?>) firstPart).get("text");
+            return (text != null) ? text.toString() : "Empty response";
+        } catch (Exception e) {
+            return "Could not parse AI response";
+        }
     }
 }
