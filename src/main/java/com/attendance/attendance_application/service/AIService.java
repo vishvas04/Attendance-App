@@ -17,6 +17,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.time.LocalDate;
 import java.time.Month;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.time.temporal.TemporalAdjusters;
 import java.util.Collections;
 import java.util.List;
@@ -74,7 +75,8 @@ public class AIService {
     }
 
     private String getMostAbsentEmployee(LocalDate date) {
-        YearMonth yearMonth = YearMonth.of(2023, 10); // October 2023
+        ZoneId zone = ZoneId.of("America/New_York");
+        YearMonth yearMonth = YearMonth.now(); // Replace YearMonth.of(2024, 3)
         LocalDate start = yearMonth.atDay(1);
         LocalDate end = yearMonth.atEndOfMonth();
 

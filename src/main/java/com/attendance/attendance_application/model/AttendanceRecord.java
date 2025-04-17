@@ -1,6 +1,7 @@
 package com.attendance.attendance_application.model;
 
 import com.attendance.attendance_application.model.AttendanceStatus;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import java.time.LocalDate;
 
@@ -19,13 +20,14 @@ public class AttendanceRecord {
 
     @ManyToOne
     @JoinColumn(name = "employee_id", nullable = false)
+    @JsonIgnore // Add this annotation
     private Employee employee;
 
     @Column(nullable = false)
     private LocalDate date;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(name = "status")
     private AttendanceStatus status;
 
     // Getters and Setters

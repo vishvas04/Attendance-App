@@ -1,5 +1,6 @@
 package com.attendance.attendance_application.model;
 
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import org.hibernate.annotations.NaturalId;
 
@@ -30,6 +31,7 @@ public class Employee {
 
     // Critical fix: Add the missing relationship
     @OneToMany(mappedBy = "employee", fetch = FetchType.LAZY)
+    @JsonManagedReference
     private List<AttendanceRecord> attendanceRecords = new ArrayList<>();
 
     // Getters and Setters
